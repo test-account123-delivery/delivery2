@@ -1,0 +1,258 @@
+# Configuration file for Statement Delivery Method Update script
+
+# Template configuration
+template_directory: "templates"
+template_file: "email_template.html"
+
+# CSV report header
+csv_header:
+  - "ENTITY_NBR"
+  - "ACCTNBR" 
+  - "ENTITY_TYPE"
+  - "CLOSE_DATE"
+  - "RESULT"
+
+# SQL Queries
+sql_queries:
+  # Main query to get records for processing
+  get_records: |
+    SELECT DISTINCT
+        'pers' as entity_type,
+        p.persnbr as entity_number,
+        a.acctnbr,
+        p.firstname || ' ' || p.lastname as entity_name,
+        TO_CHAR(ah.effdatetime, 'mm-dd-yyyy') AS close_date,
+        pu.value curr_stdl
+
+    FROM pers p
+
+    JOIN acct a
+        ON p.persnbr = a.taxrptforpersnbr
+
+    LEFT JOIN persuserfield pu
+        ON p.persnbr = pu.persnbr
+        AND pu.userfieldcd = 'STDL'
+        AND pu.value != 'PAPR'     
+
+    {{close_date_join}}
+
+    WHERE a.mjaccttypcd IN ('SAV', 'CNS', 'MTG', 'CML')
+    AND a.curracctstatcd = 'CLS'
+
+    AND (
+
+        NOT EXISTS
+
+        (  -- is not TRO on another (i.e. not the membership DSA) active deposit account or loan
+             SELECT 1
+             FROM acct
+             WHERE taxrptforpersnbr = a.taxrptforpersnbr
+             AND mjaccttypcd IN ('SAV', 'CNS', 'MTG', 'EXT', 'CML', 'CK', 'TD')
+             AND curracctstatcd IN ('ACT', 'IACT', 'DORM', 'NPFM')
+             AND rownum = 1
+        )
+
+        OR EXISTS
+
+        (
+             SELECT 1  -- The Person or Organization's only open 'Account' is a Safe Deposit Box.
+             FROM acct
+             WHERE taxrptforpersnbr = a.taxrptforpersnbr
+             AND mjaccttypcd = 'LEAS'
+             AND currmiaccttypcd = 'SDB'
+             AND curracctstatcd IN ('ACT', 'IACT', 'DORM', 'NPFM')
+             AND rownum = 1
+             AND NOT EXISTS (
+                 SELECT 1
+                 FROM acct
+                 WHERE taxrptforpersnbr = a.taxrptforpersnbr
+                 AND mjaccttypcd != 'LEAS'
+                 AND currmiaccttypcd != 'SDB'
+                 AND curracctstatcd IN ('ACT', 'IACT', 'DORM', 'NPFM')
+                 AND rownum = 1
+             )
+        )
+
+     OR EXISTS
+
+         (  -- The Person or Organization's only open 'Account' is a RTMT plan
+             SELECT 1
+             FROM acct
+             WHERE taxrptforpersnbr = a.taxrptforpersnbr
+             AND mjaccttypcd = 'RTMT'
+             AND curracctstatcd IN ('ACT', 'IACT', 'DORM', 'NPFM')
+             AND rownum = 1
+             AND NOT EXISTS (
+                 SELECT 1
+                 FROM acct
+                 WHERE taxrptforpersnbr = a.taxrptforpersnbr
+                 AND mjaccttypcd != 'RTMT'
+                 AND curracctstatcd IN ('ACT', 'IACT', 'DORM', 'NPFM')
+             )
+        )
+    )
+
+    UNION
+
+    SELECT DISTINCT
+        'org' as entity_type,
+        o.orgnbr as entity_number,
+        a.acctnbr,
+        o.orgname as entity_name,
+        TO_CHAR(ah.effdatetime, 'mm-dd-yyyy') AS close_date,
+        ou.value curr_stdl
+
+
+    FROM org o
+
+    JOIN acct a
+        ON o.orgnbr = a.taxrptfororgnbr
+
+    LEFT JOIN orguserfield ou
+        ON o.orgnbr = ou.orgnbr
+        AND ou.userfieldcd = 'STDL'
+        AND ou.value != 'PAPR'  
+
+    {{close_date_join}}
+
+    WHERE a.mjaccttypcd IN ('SAV', 'CNS', 'MTG', 'CML')
+    AND a.curracctstatcd = 'CLS'
+    AND (
+        NOT EXISTS
+        (  -- is not TRO on another (i.e. not the membership DSA) active deposit account or loan
+            SELECT 1
+            FROM acct
+            WHERE taxrptfororgnbr = a.taxrptfororgnbr
+            AND mjaccttypcd IN ('SAV', 'CNS', 'MTG', 'EXT', 'CML', 'CK', 'TD')
+            AND curracctstatcd IN ('ACT', 'IACT', 'DORM', 'NPFM')
+            AND rownum = 1
+        )
+
+        OR EXISTS
+
+        (
+            SELECT 1  -- The Person or Organization's only open 'Account' is a Safe Deposit Box.
+            FROM acct
+            WHERE taxrptfororgnbr = a.taxrptfororgnbr
+            AND mjaccttypcd = 'LEAS'
+            AND currmiaccttypcd = 'SDB'
+            AND curracctstatcd IN ('ACT', 'IACT', 'DORM', 'NPFM')
+            AND rownum = 1
+            AND NOT EXISTS (
+                SELECT 1
+                FROM acct
+                WHERE taxrptfororgnbr = a.taxrptfororgnbr
+                AND mjaccttypcd != 'LEAS'
+                AND currmiaccttypcd != 'SDB'
+                AND curracctstatcd IN ('ACT', 'IACT', 'DORM', 'NPFM')
+                AND rownum = 1
+            )
+        )
+
+        OR EXISTS
+
+        (  -- The Person or Organization's only open 'Account' is a RTMT plan
+            SELECT 1
+            FROM acct
+            WHERE taxrptfororgnbr = a.taxrptfororgnbr
+            AND mjaccttypcd = 'RTMT'
+            AND curracctstatcd IN ('ACT', 'IACT', 'DORM', 'NPFM')
+            AND rownum = 1
+            AND NOT EXISTS (
+                SELECT 1
+                FROM acct
+                WHERE taxrptfororgnbr = a.taxrptfororgnbr
+                AND mjaccttypcd != 'RTMT'
+                AND curracctstatcd IN ('ACT', 'IACT', 'DORM', 'NPFM')
+                AND rownum = 1
+            )
+        )
+    )
+
+  # Update/Insert query for person user fields
+  update_pers_stdl: |
+    MERGE INTO persuserfield pu
+    USING ( SELECT
+                :1 entity_nbr
+          FROM DUAL
+    ) x 
+    ON (pu.persnbr = x.entity_nbr 
+    AND pu.userfieldcd = 'STDL' )
+    WHEN MATCHED THEN
+        UPDATE SET
+            pu.value = 'PAPR',
+            pu.datelastmaint = SYSDATE
+    WHEN NOT MATCHED THEN
+        INSERT (
+            persnbr,
+            userfieldcd,
+            value,
+            datelastmaint
+        )
+        VALUES (
+            x.entity_nbr,
+            'STDL',
+            'PAPR',
+            SYSDATE
+        )
+
+  # Update/Insert query for organization user fields  
+  update_org_stdl: |
+    MERGE INTO orguserfield ou
+    USING ( SELECT
+                :1 entity_nbr
+          FROM DUAL
+    ) x 
+    ON (ou.orgnbr = x.entity_nbr 
+    AND ou.userfieldcd = 'STDL' )
+    WHEN MATCHED THEN
+        UPDATE SET
+            ou.value = 'PAPR',
+            ou.datelastmaint = SYSDATE
+    WHEN NOT MATCHED THEN
+        INSERT (
+            orgnbr,
+            userfieldcd,
+            value,
+            datelastmaint
+        )
+        VALUES (
+            x.entity_nbr,
+            'STDL',
+            'PAPR',
+            SYSDATE
+        )
+
+# Join fragments for different query types
+join_fragments:
+  date_specific: |
+    JOIN acctacctstathist ah
+        ON a.acctnbr = ah.acctnbr
+        AND ah.acctstatcd = a.curracctstatcd 
+        AND TRUNC(ah.effdatetime) = TO_DATE('{{run_date}}', 'mm-dd-yyyy')
+        AND ah.timeuniqueextn = (
+            SELECT MAX(timeuniqueextn)
+            FROM acctacctstathist
+            WHERE acctnbr = ah.acctnbr
+            AND acctstatcd = ah.acctstatcd
+            AND effdatetime = ah.effdatetime
+        )
+
+  full_cleanup: |
+    JOIN acctacctstathist ah
+        ON a.acctnbr = ah.acctnbr
+        AND ah.acctstatcd = a.curracctstatcd 
+        AND ah.effdatetime = (
+            SELECT MAX(effdatetime)
+            FROM acctacctstathist
+            WHERE acctnbr = ah.acctnbr
+            AND acctstatcd = ah.acctstatcd
+            AND timeuniqueextn = ah.timeuniqueextn
+        )
+        AND ah.timeuniqueextn = (
+            SELECT MAX(timeuniqueextn)
+            FROM acctacctstathist
+            WHERE acctnbr = ah.acctnbr
+            AND acctstatcd = ah.acctstatcd
+            AND effdatetime = ah.effdatetime
+        )

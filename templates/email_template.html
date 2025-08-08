@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Statement Delivery Method Update Alert</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background-color: #005a87;
+            color: white;
+            padding: 20px;
+            text-align: center;
+            border-radius: 5px 5px 0 0;
+        }
+        .content {
+            background-color: #f9f9f9;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 0 0 5px 5px;
+        }
+        .alert {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .footer {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #ddd;
+            font-size: 12px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>First Tech Federal Credit Union</h1>
+        <h2>Statement Delivery Method Update Alert</h2>
+    </div>
+    
+    <div class="content">
+        <div class="alert">
+            <strong>Alert:</strong> One or more statement delivery method updates has failed.
+        </div>
+        
+        <p>Dear System Administrator,</p>
+        
+        <p>This automated notification is to inform you that there were issues during the statement delivery method update process that ran on <strong>{{run_date}}</strong>.</p>
+        
+        <p><strong>Action Required:</strong></p>
+        <ul>
+            <li>Please review the log file(s) in Identifi for detailed error information</li>
+            <li>Investigate and resolve any failed updates</li>
+            <li>Re-run the process if necessary after resolving issues</li>
+        </ul>
+        
+        <p>If you have any questions or need assistance, please contact the system support team.</p>
+        
+        <p>Best regards,<br>
+        Automated System Notification</p>
+    </div>
+    
+    <div class="footer">
+        <p>This is an automated message from First Tech Federal Credit Union.<br>
+        Generated on {{run_date}} at {{current_time}}.</p>
+    </div>
+</body>
+</html>
