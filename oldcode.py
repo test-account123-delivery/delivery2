@@ -1,6 +1,9 @@
 from ftfcu_appworx import Apwx, JobTime
 from email.message import EmailMessage
 from pathlib import Path
+from enum import Enum, auto
+from typing import Optional
+import os
 
 import csv
 import datetime
@@ -9,9 +12,30 @@ import smtplib
 _version_ = 1.01
 
 
-def run():
-    apwx = get_apwx()
-    parse_args(apwx)
+class AppWorxEnum(Enum):
+    """Define AppWorx arguments here to avoid hard-coded strings"""
+    
+    TNS_SERVICE_NAME = auto()
+    OUTPUT_FILE_PATH = auto()
+    OUTPUT_FILE_NAME = auto()
+    RUN_DATE = auto()
+    RPTONLY_YN = auto()
+    FULL_CLEANUP_YN = auto()
+    SEND_EMAIL_YN = auto()
+    EMAIL_RECIPIENTS = auto()
+    SMTP_SERVER = auto()
+    SMTP_PORT = auto()
+    SMTP_USER = auto()
+    SMTP_PASSWORD = auto()
+    FROM_EMAIL_ADDR = auto()
+    TEST_EMAIL_ADDR = auto()
+
+    def __str__(self):
+        return self.name
+
+
+def run(apwx: Apwx):
+    """The main logic of the script goes here"""
 
     dbh = db_connect(apwx)
 
@@ -57,13 +81,11 @@ def run():
         write_report(path, fails, write_mode='a+')
 
     # send email if fails and at least one recipient
-    if fails and apwx.args.EMAIL_RECIPIENTS and apwx.args.SEND_EMAIL_YN == 'Y':
-        smtp_server = apwx.args.SMTP_SERVER
-        from_addr = apwx.args.FROM_EMAIL_ADDR
+    if fails and apwx.args.EMAIL_RECIPIENTS:
         recipients = apwx.args.EMAIL_RECIPIENTS.split(',')
-
-        send_email(smtp_server, from_addr, recipients)
-    elif fails and apwx.args.EMAIL_RECIPIENTS is None and apwx.args.SEND_EMAIL_YN == 'Y':
+        successful, message = send_email(apwx, recipients)
+        print(f"Email notification result: {message}")
+    elif fails and apwx.args.EMAIL_RECIPIENTS is None and send_email_enabled(apwx):
         print(f'SEND_EMAIL_YN == {apwx.args.SEND_EMAIL_YN}. No email recipients found.')
     else:
         print(f'No failed inserts/updates to report. No notification email(s) sent.')
@@ -73,31 +95,35 @@ def run():
     return True
 
 
-def get_apwx():
-    apwx = Apwx(['OSIUPDATE', 'OSIUPDATE_PW'])
-    apwx.print_messages = None
-    return apwx
+def get_apwx() -> Apwx:
+    """Creates a new authenticated context for Appworx"""
+    return Apwx(['OSIUPDATE', 'OSIUPDATE_PW'])
 
 
-def parse_args(apwx):
+def parse_args(apwx: Apwx) -> Apwx:
+    """Parses the arguments to the script"""
     parser = apwx.parser
 
-    parser.add_arg('TNS_SERVICE_NAME', type=str, required=True)
-    parser.add_arg('OUTPUT_FILE_PATH', type=parser.dir_validator, required=True)
-    parser.add_arg('OUTPUT_FILE_NAME', type=r'.csv$', required=True)
+    parser.add_arg(str(AppWorxEnum.TNS_SERVICE_NAME), type=str, required=True)
+    parser.add_arg(str(AppWorxEnum.OUTPUT_FILE_PATH), type=parser.dir_validator, required=True)
+    parser.add_arg(str(AppWorxEnum.OUTPUT_FILE_NAME), type=r'.csv$', required=True)
     # validate RUN_DATE parameter value via datetime object, then convert to string
-    parser.add_arg('RUN_DATE', type=lambda d: datetime.datetime.strptime(d, '%m-%d-%Y').strftime('%m-%d-%Y'),
+    parser.add_arg(str(AppWorxEnum.RUN_DATE), type=lambda d: datetime.datetime.strptime(d, '%m-%d-%Y').strftime('%m-%d-%Y'),
                    required=False)
-    parser.add_arg('RPTONLY_YN', choices=['Y', 'N'], required=True)
-    parser.add_arg('FULL_CLEANUP_YN', choices=['Y', 'N'], required=True)
-    parser.add_arg('SEND_EMAIL_YN', choices=['Y', 'N'], required=True)
-    parser.add_arg('EMAIL_RECIPIENTS', type=r'([\w\.]+@firsttechfed\.com,?)+', ignore_case=True, required=True)
-    parser.add_arg('SMTP_SERVER', type=str, required=True)
-    parser.add_arg('FROM_EMAIL_ADDR', type=r'[\w\.]+@firsttechfed\.com', default='AM_PROD@firsttechfed.com',
+    parser.add_arg(str(AppWorxEnum.RPTONLY_YN), choices=['Y', 'N'], required=True)
+    parser.add_arg(str(AppWorxEnum.FULL_CLEANUP_YN), choices=['Y', 'N'], required=True)
+    parser.add_arg(str(AppWorxEnum.SEND_EMAIL_YN), choices=['Y', 'N'], required=True)
+    parser.add_arg(str(AppWorxEnum.EMAIL_RECIPIENTS), type=r'([\w\.]+@firsttechfed\.com,?)+', ignore_case=True, required=True)
+    parser.add_arg(str(AppWorxEnum.SMTP_SERVER), type=str, required=True)
+    parser.add_arg(str(AppWorxEnum.SMTP_PORT), type=int, required=True)
+    parser.add_arg(str(AppWorxEnum.SMTP_USER), type=str, required=True)
+    parser.add_arg(str(AppWorxEnum.SMTP_PASSWORD), type=str, required=True)
+    parser.add_arg(str(AppWorxEnum.FROM_EMAIL_ADDR), type=r'[\w\.]+@firsttechfed\.com', default='AM_PROD@firsttechfed.com',
                    required=False, ignore_case=True)
+    parser.add_arg(str(AppWorxEnum.TEST_EMAIL_ADDR), type=str, required=False)
 
     apwx.parse_args()
-    return True
+    return apwx
 
 
 def db_connect(apwx):
@@ -431,24 +457,79 @@ def write_report(path, records, write_mode):
     return True
 
 
-def send_email(smtp_server, from_addr, recipients):
-    """ """
-    msg = EmailMessage()
+def send_email(apwx: Apwx, recipients: list) -> (bool, str):
+    """Send email notification for failed updates"""
+    to_address = recipients[0] if recipients else None
+    if apwx.args.TEST_EMAIL_ADDR:
+        to_address = apwx.args.TEST_EMAIL_ADDR
+    from_address = apwx.args.FROM_EMAIL_ADDR
 
-    msg['Subject'] = f'Statement Delivery Method Update Alert'
-    msg['From'] = from_addr
-    msg['To'] = recipients
+    if not to_address:
+        return False, "No email recipients"
 
-    content = f'One or more statement delivery method updates has failed.  Please see log file(s) in Identifi.'
-    msg.set_content(content)
+    # Create the email content
+    email_content = generate_email_content()
+    email_message = generate_email_message(from_address, to_address, email_content)
 
-    s = smtplib.SMTP(smtp_server)
-    s.send_message(msg)
-    s.quit()
-    return True
+    # Don't send if we're on local dev env or the SEND_EMAIL_YN parameter is N
+    if is_local_environment() or not send_email_enabled(apwx):
+        return False, "Email Send Disabled"
+
+    try:
+        send_smtp_request(apwx, from_address, to_address, email_message)
+        return True, "Email Sent"
+    except Exception as e:
+        print(f"An exception was encountered sending email to {to_address}.", e)
+        return False, "Email Failed"
 
 
-if _name_ == '_main_':
-    JobTime.print_start()
-    run()
-    JobTime.print_end()
+def generate_email_message(from_address: str, to_address: str, email_content: str) -> EmailMessage:
+    """Generate email message object"""
+    message = EmailMessage()
+    message["Subject"] = "Statement Delivery Method Update Alert"
+    message["From"] = f"First Tech Federal Credit Union <{from_address}>"
+    message["To"] = to_address
+    message.set_content(email_content)
+    message.set_type("text/html")
+    return message
+
+
+def generate_email_content() -> str:
+    """Generate custom email message content"""
+    content = "One or more statement delivery method updates has failed. Please see log file(s) in Identifi."
+    return content
+
+
+def send_smtp_request(apwx: Apwx, from_address: str, to_address: str, email_message: EmailMessage):
+    """Send email request to SMTP server"""
+    smtp_server = apwx.args.SMTP_SERVER
+    smtp_port = int(apwx.args.SMTP_PORT)
+    smtp_user = apwx.args.SMTP_USER
+    smtp_password = apwx.args.SMTP_PASSWORD
+
+    with smtplib.SMTP(smtp_server, smtp_port) as server:
+        print(f"Connecting to SMTP server {smtp_server}:{smtp_port}")
+        server.connect(smtp_server, smtp_port)
+        server.ehlo()
+        server.starttls()
+        server.ehlo()
+        print(f"Logging into {smtp_server} as {smtp_user}")
+        server.login(smtp_user, smtp_password)
+        print(f"Sending email...")
+        server.sendmail(from_address, to_address, email_message.as_string())
+
+
+def is_local_environment() -> bool:
+    """The absence of AW_HOME means AppWorx is not installed and it's local dev env"""
+    return not bool(os.environ.get("AW_HOME"))
+
+
+def send_email_enabled(apwx: Apwx) -> bool:
+    """Check if email sending is enabled"""
+    return apwx.args.SEND_EMAIL_YN.upper() == "Y"
+
+
+if __name__ == '__main__':
+    JobTime().print_start()
+    run(parse_args(get_apwx()))
+    JobTime().print_end()
